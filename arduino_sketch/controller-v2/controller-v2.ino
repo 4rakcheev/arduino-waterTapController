@@ -5,15 +5,15 @@
 
 // ****************************************************************************************** //
 // ====================================   USER CONFIGURATION   ============================== //
-const String  SOLENOID_TIME_CHECK      = "3:10";                            // Time to test solenoid. Format "G:i" 24-h without start zero.
-const int     SOLENOID_CLOSED_DURATION = 40000;                             // Duration of solenoid close in seconds
-const int     DELAY_CHECK_INTERVAL     = 3000;                              // Detectors interval check in seconds
+const String  SOLENOID_TIME_CHECK      = "12:35";                            // Time to test solenoid. Format "G:i" 24-h without start zero.
+const int     SOLENOID_CLOSED_DURATION = 20000;                             // Duration of solenoid close in milliseconds //@fixme dont work with 40000 ms:water not open after close
+const int     DELAY_CHECK_INTERVAL     = 3000;                              // Detectors interval check in milliseconds
 const String  NOTIFY_PHONE_NUMBER      = "+79036867755";                    // Telephone number to alarm and status target
 const int     NOTIFY_TRY               = 3;                                 // Count of notify owner by alarm
-const int     NOTIFY_TRY_INTERVAL      = 30000;                             // Interval by notify tries in seconds
-const int     NOTIFY_CALL_DURATION     = 15000;                             // Duration of owner telephone ring by alarm in seconds
+const int     NOTIFY_TRY_INTERVAL      = 30000;                             // Interval by notify tries in milliseconds
+const int     NOTIFY_CALL_DURATION     = 15000;                             // Duration of owner telephone ring by alarm in milliseconds
 //const unsigned long SMS_UPTIME_INTERVAL= 2617200000; // 30days+7hours          // Interval of SMS status WaterFlowController in milliseconds
-const unsigned long SMS_UPTIME_INTERVAL= 25200000; // +7hours          // Interval of SMS status WaterFlowController in milliseconds
+const unsigned long SMS_UPTIME_INTERVAL= 14400000; // +4hours          // Interval of SMS status WaterFlowController in milliseconds
 const String  detectorPinExplainList[] = {"Toilet", "BathRoom", "Kitchen"}; // Position of element must be equals at detectorPinList;
 // ****************************************************************************************** //
 
@@ -30,6 +30,7 @@ const int onboardLedPin=13;
 // Defines
 DS1307 clock;
 char compileTime[] = __TIME__;
+char compileDate[] = __DATE__;
 SoftwareSerial gsmSerial(gsmTXPin, gsmRXPin);
 const int ALARM_NOT_DETECTED = -1;
 unsigned long checkInterval;
@@ -43,7 +44,6 @@ int forceCloseButtonState = 0;
 int forceCloseButtonStateLast = 0;
 int forceCloseButtonPushCounter = 0;
 int alarmDetect = -1;
-boolean needTest=true;
 
 // ****************************************************************************************** //
 // =====================================   INITIALIZE   ===================================== //
@@ -105,13 +105,11 @@ void initClock()
  
     //Сохраняем новый хэш
     EEPROMWriteInt(0, hash);
- 
+
+    //@todo clock.fillByYMD(year,month,day);
+
     //Готовим для записи в RTC часы, минуты, секунды
     clock.fillByHMS(hour, minute, second);
-    String timeNow="";
-    timeNow += clock.hour;
-    timeNow += ":";
-    timeNow += clock.minute;
 
     //Записываем эти данные во внутреннюю память часов.
     //С этого момента они начинают считать нужное для нас время
@@ -130,10 +128,10 @@ void initSMSShield()
   gsmSerial.println("AT+CSCS=\"GSM\"");  // Coding for text
   delay(100);
   gsmSerial.println("AT+CMGDA=\"DEL ALL\""); // Delete all sms for free mem
-  // Send start sms init
+  // Delay for GSM network initialize
   delay(10000);
-  String message = "WaterFlowTap started. BuildVersion:"+String(__DATE__) + " " +String(__TIME__);
-  sendSMS(NOTIFY_PHONE_NUMBER, message);
+  // Send status SMS on start controller
+  sendPowerOnSMS();
 }
 
 
@@ -141,23 +139,22 @@ void initSMSShield()
 // ****************************************************************************************** //
 // ====================================   NOTIFICATION   ==================================== //
 
+void sendPowerOnSMS()
+{
+  String now=getStringDateNow() + " " + getStringTimeNow();
+  String message = "WaterFlowTap started. DateTimeNow: " + now + ", buildVersion:"+String(__DATE__) + " " + String(__TIME__);
+  sendSMS(NOTIFY_PHONE_NUMBER, message);
+}
+
 void sendUptimeSMS()
 {
-  clock.getTime();
-  String timeNow="";
-  timeNow += clock.hour;
-  timeNow += ":";
-  timeNow += clock.minute;
-  timeNow += ":";
-  timeNow += clock.second;
-
+  String now=getStringDateNow() + " " + getStringTimeNow();
   unsigned long uptime=millis();
   //int uptime=millis();
   float uptimeDays=uptime / 1000 / 24 / 60 / 60;
 
-  String message=String("Status from WaterFlowTap: -uptimeDays:") + String(uptimeDays) + String("(") + String(uptime) + String(")") + String(",-testSolenoidCount:") + String(testSolenoidCount) + String(",now:") + timeNow;
+  String message=String("Status from WaterFlowTap: -uptimeDays:") + String(uptimeDays) + String("(") + String(uptime) + String(")") + String(",-testSolenoidCount:") + String(testSolenoidCount) + String(",now:") + now;
   sendSMS(NOTIFY_PHONE_NUMBER, message);
-  delay(gsmPortBusySMSDelay);
 }
 
 void notifyOwner(int detectorPin)
@@ -165,7 +162,6 @@ void notifyOwner(int detectorPin)
   // send SMS
   String message=String("Alaram by " + String(explainDetectorPin(detectorPin)) + String(" detector (pin#" + String(detectorPin) + String(")")));
   sendSMS(NOTIFY_PHONE_NUMBER, message);
-  delay(gsmPortBusySMSDelay);
 
   // Call to phone
   call(NOTIFY_PHONE_NUMBER, NOTIFY_CALL_DURATION);
@@ -192,6 +188,7 @@ void sendSMS(String phone, String text)
   delay(100);
   gsmSerial.print((char)26);
   delay(100);
+  delay(gsmPortBusySMSDelay);
 }
 
 /**
@@ -270,17 +267,19 @@ boolean checkTimeToUptimeSMSSend()
  */
 boolean checkTimeToSolenoidTest()
 {
+  static boolean tested=false;
+
   clock.getTime();
   String timeNow="";
   timeNow += clock.hour;
   timeNow += ":";
   timeNow += clock.minute;
-  if (needTest && timeNow==SOLENOID_TIME_CHECK) {
-    needTest=false;
+  if (!tested && (timeNow==SOLENOID_TIME_CHECK)) {
+    tested=true;
     return true;
   }
-  else if (!needTest && timeNow!=SOLENOID_TIME_CHECK) {
-    needTest=true;
+  else if (tested && (timeNow!=SOLENOID_TIME_CHECK)) {
+    tested=false;
   }
   return false;
 }
@@ -359,6 +358,33 @@ boolean interval(int sec)
     return true;
   }
   return false;
+}
+
+String getStringTimeNow()
+{
+  clock.getTime();
+  String timeNow="";
+  timeNow += clock.hour;
+  timeNow += ":";
+  timeNow += clock.minute;
+  timeNow += ":";
+  timeNow += clock.second;
+  return timeNow;
+}
+
+/**
+ * @fixme Setdate by setup
+ */
+String getStringDateNow()
+{
+  clock.getTime();
+  String dateNow="";
+  dateNow += clock.year;
+  dateNow += " ";
+  dateNow += clock.month;
+  dateNow += " ";
+  dateNow += clock.dayOfMonth;
+  return dateNow;
 }
 
 // ****************************************************************************************** //
