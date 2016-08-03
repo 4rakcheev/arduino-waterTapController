@@ -1,19 +1,21 @@
 #include <Wire.h>
 #include <EEPROM.h>
-#include "DS1307.h"
+// #include "DS1307.h"
+#include <iarduino_RTC.h>
 #include <SoftwareSerial.h>
+
+
 
 // ****************************************************************************************** //
 // ====================================   USER CONFIGURATION   ============================== //
-const String  SOLENOID_TIME_CHECK      = "12:35";                            // Time to test solenoid. Format "G:i" 24-h without start zero.
-const int     SOLENOID_CLOSED_DURATION = 20000;                             // Duration of solenoid close in milliseconds //@fixme dont work with 40000 ms:water not open after close
+const String  SOLENOID_TIME_CHECK      = "3:35";                            // Time to test solenoid. Format "G:i" 24-h without start zero.
+const int     SOLENOID_CLOSED_DURATION = 25000;                             // Duration of solenoid close in milliseconds //@fixme dont work with 40000 ms:water not open after close
 const int     DELAY_CHECK_INTERVAL     = 3000;                              // Detectors interval check in milliseconds
 const String  NOTIFY_PHONE_NUMBER      = "+79036867755";                    // Telephone number to alarm and status target
 const int     NOTIFY_TRY               = 3;                                 // Count of notify owner by alarm
 const int     NOTIFY_TRY_INTERVAL      = 30000;                             // Interval by notify tries in milliseconds
-const int     NOTIFY_CALL_DURATION     = 15000;                             // Duration of owner telephone ring by alarm in milliseconds
-//const unsigned long SMS_UPTIME_INTERVAL= 2617200000; // 30days+7hours          // Interval of SMS status WaterFlowController in milliseconds
-const unsigned long SMS_UPTIME_INTERVAL= 14400000; // +4hours          // Interval of SMS status WaterFlowController in milliseconds
+const int     NOTIFY_CALL_DURATION     = 18000;                             // Duration of owner telephone ring by alarm in milliseconds
+const unsigned long SMS_UPTIME_INTERVAL= 1308600000; // 15days+7hours          // Interval of SMS status WaterFlowController in milliseconds
 const String  detectorPinExplainList[] = {"Toilet", "BathRoom", "Kitchen"}; // Position of element must be equals at detectorPinList;
 // ****************************************************************************************** //
 
@@ -28,9 +30,10 @@ const int gsmRXPin=2;
 const int onboardLedPin=13;
 
 // Defines
-DS1307 clock;
+//DS1307 clock;
+iarduino_RTC time(RTC_DS1307);
 char compileTime[] = __TIME__;
-char compileDate[] = __DATE__;
+
 SoftwareSerial gsmSerial(gsmTXPin, gsmRXPin);
 const int ALARM_NOT_DETECTED = -1;
 unsigned long checkInterval;
@@ -50,6 +53,10 @@ int alarmDetect = -1;
 
 void setup() 
 {
+  delay(300);
+  Serial.begin(9600);
+  Serial.println("start controllerv2");
+
   // Onboard led
   pinMode(onboardLedPin, OUTPUT);
 
@@ -68,7 +75,7 @@ void setup()
   initClock();
 
   // Init SMSShield
-  initSMSShield();
+  //initSMSShield();
 
   openWater();
 }
@@ -88,9 +95,12 @@ void initDetectorPin()
  */
 void initClock()
 {
-  // Begin RTC
-  clock.begin();
 
+  
+  // Begin RTC
+  //clock.begin();
+  time.begin();
+Serial.println("compileTime=" + String(compileTime));
   // Получаем число из строки, зная номер первого символа
   byte hour = getInt(compileTime, 0);
   byte minute = getInt(compileTime, 3);
@@ -99,21 +109,27 @@ void initClock()
   //Импровизированный хэш времени
   //Содержит в себе количество секунд с начала дня
   unsigned int hash =  hour * 60 * 60 + minute  * 60 + second; 
- 
+  Serial.println("hour="+String(hour));
+  Serial.println("minute="+String(minute));
+  Serial.println("second="+String(second));
+  Serial.println("Clockset,eeprom="+String(EEPROMReadInt(0)) + String("hash=") + String(hash));
   //Проверяем несовпадение нового хэша с хэшем в EEPROM
   if (EEPROMReadInt(0) != hash) {
- 
+
+    Serial.println("set new time");
     //Сохраняем новый хэш
     EEPROMWriteInt(0, hash);
 
-    //@todo clock.fillByYMD(year,month,day);
+    // Set date
+    //clock.fillByYMD(2016,8,2);
 
     //Готовим для записи в RTC часы, минуты, секунды
-    clock.fillByHMS(hour, minute, second);
+    //clock.fillByHMS(hour, minute, second);
 
     //Записываем эти данные во внутреннюю память часов.
     //С этого момента они начинают считать нужное для нас время
-    clock.setTime();
+    //clock.setTime();
+    time.settime(second,minute,hour,3,8,16,3);
   }
   
 }
@@ -269,11 +285,13 @@ boolean checkTimeToSolenoidTest()
 {
   static boolean tested=false;
 
-  clock.getTime();
-  String timeNow="";
-  timeNow += clock.hour;
+  //clock.getTime();
+  String timeNow=time.gettime("H:i");
+  Serial.println("Timenow=" + String(timeNow));
+//  String timeNow="";
+  //timeNow += clock.hour;
   timeNow += ":";
-  timeNow += clock.minute;
+  //timeNow += clock.minute;
   if (!tested && (timeNow==SOLENOID_TIME_CHECK)) {
     tested=true;
     return true;
@@ -362,6 +380,7 @@ boolean interval(int sec)
 
 String getStringTimeNow()
 {
+  /*
   clock.getTime();
   String timeNow="";
   timeNow += clock.hour;
@@ -370,6 +389,7 @@ String getStringTimeNow()
   timeNow += ":";
   timeNow += clock.second;
   return timeNow;
+  //*/
 }
 
 /**
@@ -377,6 +397,7 @@ String getStringTimeNow()
  */
 String getStringDateNow()
 {
+  /*
   clock.getTime();
   String dateNow="";
   dateNow += clock.year;
@@ -385,6 +406,7 @@ String getStringDateNow()
   dateNow += " ";
   dateNow += clock.dayOfMonth;
   return dateNow;
+  // */
 }
 
 // ****************************************************************************************** //
@@ -453,7 +475,11 @@ void loop()
   //  closeWater();
   //  return;
   //}
-
+  Serial.println("startsss");
+  delay(1000);
+  Serial.println(time.gettime("d-m-Y, H:i:s, D"));
+  
+/*
   // Open water if alarm not detected
   if (alarmDetect == ALARM_NOT_DETECTED) {
     openWater();
@@ -479,9 +505,10 @@ void loop()
     sendUptimeSMS();
     restartController();
   }
-
+  // */
   // Solenoid test func
   if (checkTimeToSolenoidTest()) {
     testWaterSolenoid();
   }
+
 }
