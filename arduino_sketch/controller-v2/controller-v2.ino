@@ -1,22 +1,18 @@
 #include <Wire.h>
-#include <EEPROM.h>
-// #include "DS1307.h"
-#include <iarduino_RTC.h>
 #include <SoftwareSerial.h>
-
-
+#include "RTClib.h"
 
 // ****************************************************************************************** //
 // ====================================   USER CONFIGURATION   ============================== //
-const String  SOLENOID_TIME_CHECK      = "3:35";                            // Time to test solenoid. Format "G:i" 24-h without start zero.
-const int     SOLENOID_CLOSED_DURATION = 25000;                             // Duration of solenoid close in milliseconds //@fixme dont work with 40000 ms:water not open after close
-const int     DELAY_CHECK_INTERVAL     = 3000;                              // Detectors interval check in milliseconds
-const String  NOTIFY_PHONE_NUMBER      = "+79036867755";                    // Telephone number to alarm and status target
-const int     NOTIFY_TRY               = 3;                                 // Count of notify owner by alarm
-const int     NOTIFY_TRY_INTERVAL      = 30000;                             // Interval by notify tries in milliseconds
-const int     NOTIFY_CALL_DURATION     = 18000;                             // Duration of owner telephone ring by alarm in milliseconds
-const unsigned long SMS_UPTIME_INTERVAL= 1308600000; // 15days+7hours          // Interval of SMS status WaterFlowController in milliseconds
-const String  detectorPinExplainList[] = {"Toilet", "BathRoom", "Kitchen"}; // Position of element must be equals at detectorPinList;
+const String   SOLENOID_TIME_CHECK      = "3:35:5";                           // Time to test solenoid. Format "h:m:s" without lead zero. Ex.: "3:25:0"
+const int      SOLENOID_CLOSED_DURATION = 25000;                              // Duration of solenoid close in milliseconds //@fixme dont work with 40000 ms:water not open after close
+const int      DELAY_CHECK_INTERVAL     = 3000;                               // Detectors interval check in milliseconds
+const String   NOTIFY_PHONE_NUMBER      = "+79036867755";                     // Telephone number to alarm and status target
+const int      NOTIFY_TRY               = 2;                                  // Count of notify owner by alarm
+const int      NOTIFY_TRY_INTERVAL      = 30000;                              // Interval by notify tries in milliseconds
+const int      NOTIFY_CALL_DURATION     = 18000;                              // Duration of owner telephone ring by alarm in milliseconds
+const long int SMS_UPTIME_INTERVAL      = 1296000; // 15days                  // Interval of SMS status WaterFlowController in seconds
+const String   detectorPinExplainList[] = {"Toilet", "BathRoom", "Kitchen"};  // Position of element must be equals at detectorPinList;
 // ****************************************************************************************** //
 
 // Pin config
@@ -30,14 +26,9 @@ const int gsmRXPin=2;
 const int onboardLedPin=13;
 
 // Defines
-//DS1307 clock;
-iarduino_RTC time(RTC_DS1307);
-char compileTime[] = __TIME__;
-
+RTC_DS1307 rtc;
 SoftwareSerial gsmSerial(gsmTXPin, gsmRXPin);
 const int ALARM_NOT_DETECTED = -1;
-unsigned long checkInterval;
-unsigned long checkIntervalCurrent;
 const int gsmPortBusySMSDelay=8000;
 
 // Variables
@@ -47,16 +38,13 @@ int forceCloseButtonState = 0;
 int forceCloseButtonStateLast = 0;
 int forceCloseButtonPushCounter = 0;
 int alarmDetect = -1;
+long int timestampStart=0;
 
 // ****************************************************************************************** //
 // =====================================   INITIALIZE   ===================================== //
 
 void setup() 
 {
-  delay(300);
-  Serial.begin(9600);
-  Serial.println("start controllerv2");
-
   // Onboard led
   pinMode(onboardLedPin, OUTPUT);
 
@@ -66,6 +54,7 @@ void setup()
   // Relay Pin
   pinMode(relayPin, OUTPUT);
 
+  // Close water by initialize other components
   closeWater();
 
   // Init detecors pin list
@@ -75,8 +64,9 @@ void setup()
   initClock();
 
   // Init SMSShield
-  //initSMSShield();
+  initSMSShield();
 
+  // Start water on finish initialize
   openWater();
 }
 
@@ -90,48 +80,20 @@ void initDetectorPin()
   }
 }
 
-/**
- * @fixme
- */
 void initClock()
 {
-
-  
-  // Begin RTC
-  //clock.begin();
-  time.begin();
-Serial.println("compileTime=" + String(compileTime));
-  // Получаем число из строки, зная номер первого символа
-  byte hour = getInt(compileTime, 0);
-  byte minute = getInt(compileTime, 3);
-  byte second = getInt(compileTime, 6);
-
-  //Импровизированный хэш времени
-  //Содержит в себе количество секунд с начала дня
-  unsigned int hash =  hour * 60 * 60 + minute  * 60 + second; 
-  Serial.println("hour="+String(hour));
-  Serial.println("minute="+String(minute));
-  Serial.println("second="+String(second));
-  Serial.println("Clockset,eeprom="+String(EEPROMReadInt(0)) + String("hash=") + String(hash));
-  //Проверяем несовпадение нового хэша с хэшем в EEPROM
-  if (EEPROMReadInt(0) != hash) {
-
-    Serial.println("set new time");
-    //Сохраняем новый хэш
-    EEPROMWriteInt(0, hash);
-
-    // Set date
-    //clock.fillByYMD(2016,8,2);
-
-    //Готовим для записи в RTC часы, минуты, секунды
-    //clock.fillByHMS(hour, minute, second);
-
-    //Записываем эти данные во внутреннюю память часов.
-    //С этого момента они начинают считать нужное для нас время
-    //clock.setTime();
-    time.settime(second,minute,hour,3,8,16,3);
+  if (! rtc.begin()) {
+    return;
   }
   
+  if (! rtc.isrunning()) {
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
+
+  // Setup start timestamp
+  DateTime now = rtc.now();
+  timestampStart=now.unixtime();
 }
 
 void initSMSShield()
@@ -146,6 +108,7 @@ void initSMSShield()
   gsmSerial.println("AT+CMGDA=\"DEL ALL\""); // Delete all sms for free mem
   // Delay for GSM network initialize
   delay(10000);
+
   // Send status SMS on start controller
   sendPowerOnSMS();
 }
@@ -157,19 +120,13 @@ void initSMSShield()
 
 void sendPowerOnSMS()
 {
-  String now=getStringDateNow() + " " + getStringTimeNow();
-  String message = "WaterFlowTap started. DateTimeNow: " + now + ", buildVersion:"+String(__DATE__) + " " + String(__TIME__);
+  String message = "WaterFlowTapController started (buildVersion: "+ getBuildVersion()+")! SystemDateTime: " + getStringDateNow() + " " + getStringTimeNow();
   sendSMS(NOTIFY_PHONE_NUMBER, message);
 }
 
 void sendUptimeSMS()
 {
-  String now=getStringDateNow() + " " + getStringTimeNow();
-  unsigned long uptime=millis();
-  //int uptime=millis();
-  float uptimeDays=uptime / 1000 / 24 / 60 / 60;
-
-  String message=String("Status from WaterFlowTap: -uptimeDays:") + String(uptimeDays) + String("(") + String(uptime) + String(")") + String(",-testSolenoidCount:") + String(testSolenoidCount) + String(",now:") + now;
+  String message = "WaterFlowTapController status: UptimeDays:" + String(getUptimeDays()) + "(" + String(getUptime()) + "s)" + ",TestSolenoidCount:" + String(testSolenoidCount) + ",SysDate:" + getStringDateNow() + " " + getStringTimeNow();
   sendSMS(NOTIFY_PHONE_NUMBER, message);
 }
 
@@ -188,7 +145,8 @@ void notifyOwnerBatch(int detectorPin, int tryCount=NOTIFY_TRY, int interval=NOT
   int i=0;
   while (i < NOTIFY_TRY) {
     notifyOwner(detectorPin);
-    delay(NOTIFY_TRY_INTERVAL);
+    delay
+    (NOTIFY_TRY_INTERVAL);
     i++;
   }
 }
@@ -271,9 +229,12 @@ boolean checkForceCloseState() {
  */
 boolean checkTimeToUptimeSMSSend()
 {
-  unsigned long uptimeSec=millis();
-  if ((uptimeSec > 0) && (uptimeSec >= SMS_UPTIME_INTERVAL)) {
-    return true;
+  if (!rtc.isrunning()) {
+    return false;
+  }
+  DateTime now = rtc.now();
+  if (now.unixtime() % SMS_UPTIME_INTERVAL==0) {
+    return true; 
   }
   return false;
 }
@@ -283,21 +244,8 @@ boolean checkTimeToUptimeSMSSend()
  */
 boolean checkTimeToSolenoidTest()
 {
-  static boolean tested=false;
-
-  //clock.getTime();
-  String timeNow=time.gettime("H:i");
-  Serial.println("Timenow=" + String(timeNow));
-//  String timeNow="";
-  //timeNow += clock.hour;
-  timeNow += ":";
-  //timeNow += clock.minute;
-  if (!tested && (timeNow==SOLENOID_TIME_CHECK)) {
-    tested=true;
+  if (getStringTimeNow() == SOLENOID_TIME_CHECK) {
     return true;
-  }
-  else if (tested && (timeNow!=SOLENOID_TIME_CHECK)) {
-    tested=false;
   }
   return false;
 }
@@ -321,9 +269,58 @@ void testWaterSolenoid()
 // ======================================   HELPERS   ======================================= //
 
 /**
- * Restart Arduino controller function
+ * Restart Arduino controller function. Usage: call restartController() 
  */
 void(* restartController) (void) = 0;
+
+String getBuildVersion()
+{
+  return String(__TIME__) + " " + String(__DATE__);
+}
+
+/**
+ * Returns seconds uptime
+ */
+int getUptime()
+{
+  if (!rtc.isrunning() || timestampStart <=0 ) {
+    return -1;
+  }
+  DateTime now = rtc.now();
+  return now.unixtime() - timestampStart;
+}
+
+/**
+ * Returns uptime in days
+ */
+int getUptimeDays() 
+{
+  return getUptime() / 24 / 60 / 60 ;
+}
+
+/**
+ * Generate String Time at now
+ */
+String getStringTimeNow()
+{
+  if (!rtc.isrunning()) {
+    return "RTC is not running";
+  }
+  DateTime now = rtc.now();
+  return String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second());
+}
+
+/**
+ * Generate String Date at now
+ */
+String getStringDateNow()
+{
+  if (!rtc.isrunning()) {
+    return "RTC is not running";
+  }
+  DateTime now = rtc.now();
+  return String(now.year()) + "/" + String(now.month()) + "/" + String(now.day());
+}
 
 /**
  * Returns human readable String of detectorPin
@@ -338,76 +335,17 @@ String explainDetectorPin(int detectorPin)
   return String("Empty detector");
 }
 
-/** 
- * For RTC time explain 
- */
-char getInt(const char* string, int startIndex) {
-  return int(string[startIndex] - '0') * 10 + int(string[startIndex+1]) - '0';
-}
-
-/**
- * Write two bytes in EEPROM
- */
-void EEPROMWriteInt(int address, int value)
-{
-  EEPROM.write(address, lowByte(value));
-  EEPROM.write(address + 1, highByte(value));
-}
- 
-/**
- * Read from EEPROM
- */
-unsigned int EEPROMReadInt(int address)
-{
-  byte lowByte = EEPROM.read(address);
-  byte highByte = EEPROM.read(address + 1);
- 
-  return (highByte << 8) | lowByte;
-}
-
 /**
  * Returns success for interval exists from start arduino
  */
-boolean interval(int sec)
+boolean interval(int mil)
 {
-  checkIntervalCurrent=millis();
-  if ((checkIntervalCurrent - checkInterval) > sec) {
-    checkInterval=checkIntervalCurrent;
+  if (millis()%mil==0) {
     return true;
   }
   return false;
 }
 
-String getStringTimeNow()
-{
-  /*
-  clock.getTime();
-  String timeNow="";
-  timeNow += clock.hour;
-  timeNow += ":";
-  timeNow += clock.minute;
-  timeNow += ":";
-  timeNow += clock.second;
-  return timeNow;
-  //*/
-}
-
-/**
- * @fixme Setdate by setup
- */
-String getStringDateNow()
-{
-  /*
-  clock.getTime();
-  String dateNow="";
-  dateNow += clock.year;
-  dateNow += " ";
-  dateNow += clock.month;
-  dateNow += " ";
-  dateNow += clock.dayOfMonth;
-  return dateNow;
-  // */
-}
 
 // ****************************************************************************************** //
 // ========================================   MAIN   ======================================== //
@@ -475,11 +413,7 @@ void loop()
   //  closeWater();
   //  return;
   //}
-  Serial.println("startsss");
-  delay(1000);
-  Serial.println(time.gettime("d-m-Y, H:i:s, D"));
-  
-/*
+
   // Open water if alarm not detected
   if (alarmDetect == ALARM_NOT_DETECTED) {
     openWater();
@@ -503,9 +437,8 @@ void loop()
   // Send sms log uptime
   if (checkTimeToUptimeSMSSend()) {
     sendUptimeSMS();
-    restartController();
   }
-  // */
+
   // Solenoid test func
   if (checkTimeToSolenoidTest()) {
     testWaterSolenoid();
