@@ -5,15 +5,15 @@
 
 // ****************************************************************************************** //
 // ====================================   USER CONFIGURATION   ============================== //
-const String  SOLENOID_TIME_CHECK      = "12:35";                            // Time to test solenoid. Format "G:i" 24-h without start zero.
-const int     SOLENOID_CLOSED_DURATION = 20000;                             // Duration of solenoid close in milliseconds //@fixme dont work with 40000 ms:water not open after close
+const String  SOLENOID_TIME_CHECK      = "3:35";                            // Time to test solenoid. Format "G:i" 24-h without start zero.
+const int     SOLENOID_CLOSED_DURATION = 25000;                             // Duration of solenoid close in milliseconds //@fixme dont work with 40000 ms:water not open after close
 const int     DELAY_CHECK_INTERVAL     = 3000;                              // Detectors interval check in milliseconds
 const String  NOTIFY_PHONE_NUMBER      = "+79036867755";                    // Telephone number to alarm and status target
 const int     NOTIFY_TRY               = 3;                                 // Count of notify owner by alarm
 const int     NOTIFY_TRY_INTERVAL      = 30000;                             // Interval by notify tries in milliseconds
 const int     NOTIFY_CALL_DURATION     = 15000;                             // Duration of owner telephone ring by alarm in milliseconds
 //const unsigned long SMS_UPTIME_INTERVAL= 2617200000; // 30days+7hours          // Interval of SMS status WaterFlowController in milliseconds
-const unsigned long SMS_UPTIME_INTERVAL= 14400000; // +4hours          // Interval of SMS status WaterFlowController in milliseconds
+const unsigned long SMS_UPTIME_INTERVAL= 172800000; // 48hours          // Interval of SMS status WaterFlowController in milliseconds
 const String  detectorPinExplainList[] = {"Toilet", "BathRoom", "Kitchen"}; // Position of element must be equals at detectorPinList;
 // ****************************************************************************************** //
 
