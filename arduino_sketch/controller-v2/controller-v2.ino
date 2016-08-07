@@ -120,13 +120,13 @@ void initSMSShield()
 
 void sendPowerOnSMS()
 {
-  String message = "WaterFlowTapController started (buildVersion: "+ getBuildVersion()+")! SystemDateTime: " + getStringDateNow() + " " + getStringTimeNow();
+  String message = "WaterFlowTapController started (buildVersion="+ getBuildVersion()+")! SystemDateTime=" + getStringDateNow() + " " + getStringTimeNow();
   sendSMS(NOTIFY_PHONE_NUMBER, message);
 }
 
 void sendUptimeSMS()
 {
-  String message = "WaterFlowTapController status: UptimeDays:" + String(getUptimeDays()) + "(" + String(getUptime()) + "s)" + ",TestSolenoidCount:" + String(testSolenoidCount) + ",SysDate:" + getStringDateNow() + " " + getStringTimeNow();
+  String message = "WaterFlowTapController status: UptimeDays=" + String(getUptimeDays()) + "(" + String(getUptime()) + "s)" + ",TestSolenoidCount=" + String(testSolenoidCount) + ",SysDate=" + getStringDateNow() + " " + getStringTimeNow();
   sendSMS(NOTIFY_PHONE_NUMBER, message);
 }
 
@@ -145,8 +145,7 @@ void notifyOwnerBatch(int detectorPin, int tryCount=NOTIFY_TRY, int interval=NOT
   int i=0;
   while (i < NOTIFY_TRY) {
     notifyOwner(detectorPin);
-    delay
-    (NOTIFY_TRY_INTERVAL);
+    delay(NOTIFY_TRY_INTERVAL);
     i++;
   }
 }
@@ -338,14 +337,17 @@ String explainDetectorPin(int detectorPin)
 /**
  * Returns success for interval exists from start arduino
  */
-boolean interval(int mil)
+boolean checkInterval(unsigned long mil)
 {
-  if (millis()%mil==0) {
+  static unsigned long checkIntervalLast;
+  unsigned long checkIntervalCurrent;
+  checkIntervalCurrent=millis();
+  if ((checkIntervalCurrent - checkIntervalLast) > mil) {
+    checkIntervalLast=checkIntervalCurrent;
     return true;
   }
   return false;
 }
-
 
 // ****************************************************************************************** //
 // ========================================   MAIN   ======================================== //
@@ -425,7 +427,7 @@ void loop()
   }
 
   // Check water flow detectors
-  if (interval(DELAY_CHECK_INTERVAL)) {
+  if (checkInterval(DELAY_CHECK_INTERVAL)) {
     int detectorPin = checkDetectors();
     if (detectorPin != ALARM_NOT_DETECTED) {
       closeWater();
